@@ -13,7 +13,6 @@
             {% for langname in translations.keys() %}
                 {% if langname != lang and post.is_translation_available(langname) %}
                     <a href="{{post.permalink(langname)}}">{{messages("Read in English", langname)}}</a>
-                    &nbsp;&nbsp;|&nbsp;&nbsp;
                 {% endif %}
             {% endfor %}
         {% endif %}
