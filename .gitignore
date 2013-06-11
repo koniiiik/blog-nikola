@@ -2,3 +2,5 @@
 .*.swp
 Session.vim
 env-nikola
+.doit.db
+output
