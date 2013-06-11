@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
 import time
@@ -291,10 +290,33 @@ DISQUS_FORUM = "koniiiik"
 # Enable comments on picture gallery pages?
 # COMMENTS_IN_GALLERIES = False
 
+# What file should be used for directory indexes?
+# Defaults to index.html
+# Common other alternatives: default.html for IIS, index.php
+# INDEX_FILE = "index.html"
+
 # If a link ends in /index.html, drop the index.html part.
 # http://mysite/foo/bar/index.html => http://mysite/foo/bar/
+# (Uses the INDEX_FILE setting, so if that is, say, default.html,
+# it will instead /foo/default.html => /foo)
+# (Note: This was briefly STRIP_INDEX_HTML in v 5.4.3 and 5.4.4)
 # Default = False
-STRIP_INDEX_HTML = True
+# STRIP_INDEXES = False
+
+# Should the sitemap list directories which only include other directories
+# and no files.
+# Default to True
+# If this is False
+# e.g. /2012 includes only /01, /02, /03, /04, ...: don't add it to the sitemap
+# if /2012 includes any files (including index.html)... add it to the sitemap
+SITEMAP_INCLUDE_FILELESS_DIRS = False
+
+# Instead of putting files in <slug>.html, put them in
+# <slug>/index.html. Also enables STRIP_INDEXES
+# This can be disabled on a per-page/post basis by adding
+#    .. pretty_url: False
+# to the metadata
+PRETTY_URLS = True
 
 # Do you want a add a Mathjax config file?
 # TODO
@@ -315,6 +337,11 @@ STRIP_INDEX_HTML = True
 #});
 #</script>
 #"""
+
+# What MarkDown extensions to enable?
+# You will also get gist, nikola and podcast because those are
+# done in the code, hope you don't mind ;-)
+# MARKDOWN_EXTENSIONS = ['fenced_code', 'codehilite']
 
 # Enable Addthis social buttons?
 # Defaults to true
@@ -354,7 +381,7 @@ RSS_TEASERS = True
 #<input type="submit" value="DuckDuckGo Search" style="visibility: hidden;" />
 #</form>
 #<!-- End of custom search -->
-#""" % BLOG_URL
+#""" % SITE_URL
 #
 # Also, there is a local search plugin you can use.
 
@@ -393,7 +420,8 @@ USE_CDN = True
 #
 # IMPORTANT:
 # Please note, that you need to opt-in for using Twitter Cards!
-# To do this please visit https://dev.twitter.com/form/participate-twitter-cards
+# To do this please visit
+# https://dev.twitter.com/form/participate-twitter-cards
 #
 # Uncomment and modify to following lines to match your accounts.
 # Specifying the id for either 'site' or 'creator' will be preferred
@@ -408,7 +436,8 @@ USE_CDN = True
 # }
 
 
-# If you want to use formatted post time in W3C-DTF Format(ex. 2012-03-30T23:00:00+02:00),
+# If you want to use formatted post time in W3C-DTF Format
+# (ex. 2012-03-30T23:00:00+02:00),
 # set timzone if you want a localized posted date.
 #
 TIMEZONE = 'Europe/Bratislava'
@@ -420,13 +449,18 @@ TIMEZONE = 'Europe/Bratislava'
 # DISABLED_PLUGINS = ["render_galleries"]
 
 # Experimental plugins - use at your own risk.
-# They probably need some manual adjustments - please see their respective readme.
+# They probably need some manual adjustments - please see their respective
+# readme.
 # ENABLED_EXTRAS = [
 #     'planetoid',
 #     'ipynb',
-#     'localsearch',
+#     'local_search',
 #     'mustache',
 # ]
+
+# List of regular expressions, links matching them will always be considered
+# valid by "nikola check -l"
+# LINK_CHECK_WHITELIST = []
 
 # Put in global_context things you want available on all your templates.
 # It can be anything, data, functions, modules, etc.
