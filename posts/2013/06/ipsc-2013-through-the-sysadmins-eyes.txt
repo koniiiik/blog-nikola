@@ -1,0 +1,353 @@
+.. title: IPSC 2013 through the sysadmin's eyes
+.. slug: ipsc-2013-through-the-sysadmins-eyes
+.. tags: ipsc, administration, nginx, uwsgi, xen, GSO, kernel bug
+.. description: 
+.. date: 2013/06/11 11:30:51
+.. link: 
+
+This year's `Internet Problem Solving Contest`_ is over.  This year was
+special for me, because for the first time I was the root responsible for
+making sure that shit doesn't happen during the contest and in case shit
+does happen, make it go away.
+
+.. _Internet Problem Solving Contest: IPSC_
+
+.. TEASER_END
+
+Historically, we always had server outages during the contest due to the
+relatively high number of HTTP requests from contestants, especially at
+the immediate beginning of the contest, when everyone is downloading the
+problem statements, and then also as the end draws near, when everyone
+keeps spamming F5 on the results page.
+
+After I took charge of our servers a year and a half ago, I decided to put
+an end to these outages.  Unfortunately, last year I was busy around the
+time of the contest (writing my Bachelor's thesis), so I didn't really
+have the time to tune our servers.  This year, however, I finally got
+around to boosting the performance of the IPSC website.
+
+Tuning the server
+-----------------
+
+Usually the server outages were caused by Apache spawning too many server
+processes and causing the server to swap itself into oblivion.  The
+previous version of the web interface was a PHP thing and it used to be
+hosted on our main server that we use for everyday tasks, SVN/git hosting,
+people's personal pages, SSH access etc.
+
+Due to the fact that the server hosts people's personal pages, often using
+PHP and things like .htaccess for mod_rewrite and other stuff, we can't
+really ditch Apache on that server and getting that mammoth of a server to
+behave is no easy task.  (It's no secret I despise Apache nearly as much
+as I despise PHP.  All in all, my general opinion is that the whole LAMP
+stack is just lots of shit piled on top of each other, but well, that's
+another story.)
+
+Last year, Tomi Belan rewrote the whole web frontend in Python as a WSGI
+application.  Personally, I consider this a step in the good direction,
+obviously, with my involvement in the Python web development community.
+My immediate intention was to put this app on a separate virtual machine
+behing nginx and tune it to accept more than a few (<10) requests per
+second.
+
+So that's what we did.  We used a spare virtual machine that's been
+sitting on our physical server unused for many years and set up nginx and
+uWSGI to run and serve the app.  Tomi implemented certain measures to make
+the most expensive pages load much faster (the results pages).
+
+Then, about a week before the actual contest, I did some benchmarks to
+find out how high a load the server will be able to handle.  I played
+around with httperf, autobench and ab for a while and I found out that if
+the server was hit with too many requests (about 500 per second), it would
+just respond with a 502 error to most of them.  That was weird to me, I
+certainly didn't expect the server to swat nearly all requests for a page
+that takes about one millisecond to render away with a 502 Bad Gateway
+error.
+
+So I tried to look at the logs and in the nginx error log I found the
+following::
+
+    connect() to unix:///run/uwsgi/app/ipsc/socket failed (11: Resource temporarily unavailable) while connecting to upstream
+
+The first candidate for a solution I found by googling was to increase the
+``net.netfilter.nf_conntrack_max`` sysctl.  However, that didn't help, so
+I kept searching until I found the real cause.
+
+Each socket keeps a queue of incoming connections that have not yet been
+accepted by the application listening on the socket.  By default on Linux,
+the queue is limited to 128 incoming connections, which, to me, is
+surprisingly low.  uWSGI sets it even lower for its socket, it only allows
+100 incoming connections.  In uWSGI the relevant setting is ``listen``,
+which I raised to 2048.  However, this alone isn't enough as Linux won't
+allow any process to raise this above the global limit, which is set in
+the ``net.core.somaxconn`` sysctl whose default value is, as I already
+mentioned, 128.  So I raised this to 2048 as well.
+
+Next, nginx started to complain about insufficient worker connections::
+
+    2013/06/01 00:23:50 [alert] 24814#0: 768 worker_connections are not enough
+    2013/06/01 00:23:50 [alert] 24814#0: *14708 768 worker_connections are not enough while connecting to upstream, client: 158.195.17.76, server: , request: "GET / HTTP/1.1", upstream: "uwsgi://unix:///run/uwsgi/app/ipsc/socket:", host: "ipsc.ksp.sk"
+
+This one was fairly straightforward to diagnose, I just had to raise
+``worker_connections`` and that was about it.
+
+The story is not over yet, though.  After fixing this, the server started
+to spam the error log with these::
+
+    2013/06/01 00:51:52 [alert] 29982#0: *42773 socket() failed (24: Too many open files) while connecting to upstream, client: 158.195.17.76, server: , request: "GET / HTTP/1.1", upstream: "uwsgi://unix:///run/uwsgi/app/ipsc/socket:", host: "ipsc.ksp.sk" 
+    2013/06/01 00:51:52 [crit] 29982#0: accept4() failed (24: Too many open files)
+
+This is a symptom of an insufficient limit on the number of open file
+descriptors per process.  If you try to google for these error messages,
+you'll come across a lot of suggestions to modify
+``/etc/security/limits.conf``, raise the system-wide limit on open files
+to 4096 or whatever (both soft and hard), add ``pam_limits.so`` to the
+``common-session`` config file of PAM, logout/login and restart the
+server.  While this may work for you the moment you start the server
+manually, the higher limit won't apply if the server is started at bootup
+by init, since in that case, it doesn't go through any PAM mechanism which
+would apply the settings from ``limits.conf``.
+
+Instead, the actual solution on Debian is to enable ``ULIMIT="-n 4096"``
+in ``/etc/default/nginx`` or add the following to your ``nginx.conf``::
+
+    worker_rlimit_nofile 4096;
+
+After going through all this setup, I was satisfied with the server setup.
+It can serve about 600 requests for the main page per second and buffer a
+sufficient number of requests before responding with 5xx codes instead of
+just failing immediately when the number of requests increases.
+
+I also did a few benchmarks on the main results page.  The page itself
+renders within 10 milliseconds, which is quite fast, considering it's half
+a megabyte long.  That means, this page responds at a rate of more than
+100 requests per second, which should be sufficient, as this corresponds
+to a bandwidth of about 62 MB/s – that's about one half of the bandwidth
+of the server's gigabit connection.
+
+The morning before the contest
+------------------------------
+
+The day of the contest I got up at about 9:00 a.m.  The contest itself
+started ad 12:00 p.m. in our timezone.  I ate my breakfast, checked my
+email, read the RSS and was getting ready to go out to take care of a few
+things before the start of the contest.  As I was about to pack my laptop,
+I noticed that the SSH connection to our server timed out.  This is
+nothing exceptional – our faculty, where our servers are housed, has
+connectivity outages quite often.
+
+Unfortunately, as I was leaving, Usamec told me the IPSC server is down as
+well, while other machines in the same room are accessible.  Crap.
+
+So I hurried to school to threaten the server with a hammer to make it
+behave.  As I was on my way, Miňo Plžík called me and said he was
+investigating the cause.  When I arrived to school and connected a display
+and keyboard to the machine, I was greeted by this backtrace::
+
+    Jun  8 09:16:22 prezident kernel: [4545085.998861] vif vif-10-1: vif10.1: Frag is bigger than frame.
+    Jun  8 09:16:22 prezident kernel: [4545085.998941] vif vif-10-1: vif10.1: fatal error; disabling device
+    Jun  8 09:16:22 prezident kernel: [4545085.999041] BUG: unable to handle kernel NULL pointer dereference at 00000000000008b8
+    Jun  8 09:16:22 prezident kernel: [4545085.999157] IP: [<ffffffff8134d981>] _raw_spin_lock_irqsave+0xe/0x25
+    Jun  8 09:16:22 prezident kernel: [4545085.999254] PGD 466ab067 PUD 4d7ee067 PMD 0 
+    Jun  8 09:16:22 prezident kernel: [4545085.999334] Oops: 0002 [#1] SMP 
+    Jun  8 09:16:22 prezident kernel: [4545085.999390] CPU 2 
+    Jun  8 09:16:22 prezident kernel: [4545085.999413] Modules linked in: xt_tcpudp xt_physdev iptable_filter ip_tables x_tables xen_netback xen_blkback xen_gntdev xen_evtchn xenfs bridge stp lm85 hwmon_vid ipmi_devintf ipmi_msghandler loop snd_pcm snd_page_alloc snd_timer rade
+    on coretemp iTCO_wdt acpi_cpufreq mperf crc32c_intel snd ghash_clmulni_intel aesni_intel aes_x86_64 aes_generic cryptd ttm drm_kms_helper drm power_supply i2c_algo_bit i2c_i801 soundcore iTCO_vendor_support processor button i2c_core evdev pcspkr thermal_sys ext4 crc16 jbd2 
+    mbcache dm_mod raid1 usbhid hid md_mod sg sr_mod sd_mod cdrom crc_t10dif ahci libahci ehci_hcd usbcore e1000e libata usb_common scsi_mod [last unloaded: scsi_wait_scan]
+    Jun  8 09:16:22 prezident kernel: [4545086.000551] 
+    Jun  8 09:16:22 prezident kernel: [4545086.000573] Pid: 3342, comm: netback/2 Not tainted 3.2.0-4-amd64 #1 Debian 3.2.39-2 FUJITSU PRIMERGY TX100 S3/D3009-A1
+    Jun  8 09:16:22 prezident kernel: [4545086.000738] RIP: e030:[<ffffffff8134d981>]  [<ffffffff8134d981>] _raw_spin_lock_irqsave+0xe/0x25
+    Jun  8 09:16:22 prezident kernel: [4545086.000859] RSP: e02b:ffff8801d5e9bc30  EFLAGS: 00010002
+    Jun  8 09:16:22 prezident kernel: [4545086.000936] RAX: ffff8801a9990218 RBX: 00000000000008b8 RCX: 0000000002d4792a
+    Jun  8 09:16:22 prezident kernel: [4545086.001039] RDX: 0000000000010000 RSI: ffffc900124d2000 RDI: 00000000000008b8
+    Jun  8 09:16:22 prezident kernel: [4545086.001142] RBP: 00000000000008b8 R08: 0000000000020055 R09: 000000000000003b
+    Jun  8 09:16:22 prezident kernel: [4545086.001244] R10: ffffffff81433340 R11: ffffffff81433340 R12: ffff8801a999b740
+    Jun  8 09:16:22 prezident kernel: [4545086.001347] R13: 0000000000000000 R14: ffff8801a999b818 R15: ffff880028e60002
+    Jun  8 09:16:22 prezident kernel: [4545086.001453] FS:  00007f7aa20d5700(0000) GS:ffff8801ef300000(0000) knlGS:0000000000000000
+    Jun  8 09:16:22 prezident kernel: [4545086.001565] CS:  e033 DS: 0000 ES: 0000 CR0: 000000008005003b
+    Jun  8 09:16:22 prezident kernel: [4545086.001650] CR2: 00000000000008b8 CR3: 000000003f10f000 CR4: 0000000000002660
+    Jun  8 09:16:22 prezident kernel: [4545086.001753] DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+    Jun  8 09:16:22 prezident kernel: [4545086.001856] DR3: 0000000000000000 DR6: 00000000ffff0ff0 DR7: 0000000000000400
+    Jun  8 09:16:22 prezident kernel: [4545086.001959] Process netback/2 (pid: 3342, threadinfo ffff8801d5e9a000, task ffff8801dfba47f0)
+    Jun  8 09:16:22 prezident kernel: [4545086.002080] Stack:
+    Jun  8 09:16:22 prezident kernel: [4545086.002111]  0000000000000000 ffffffffa03d4ddd ffffffff81433340 ffff8801a999b740
+    Jun  8 09:16:22 prezident kernel: [4545086.002240]  0000000002d4792a 0000000002d4792a 0000000000000000 0000000002d4792a
+    Jun  8 09:16:22 prezident kernel: [4545086.002363]  ffff880028e60002 ffffffffa03d4f71 ffff8801a999b740 ffffc90011837580
+    Jun  8 09:16:22 prezident kernel: [4545086.002486] Call Trace:
+    Jun  8 09:16:22 prezident kernel: [4545086.002522]  [<ffffffffa03d4ddd>] ? xen_netbk_schedule_xenvif+0x35/0xd6 [xen_netback]
+    Jun  8 09:16:22 prezident kernel: [4545086.002631]  [<ffffffffa03d4f71>] ? netbk_tx_err+0x3f/0x4b [xen_netback]
+    Jun  8 09:16:22 prezident kernel: [4545086.002727]  [<ffffffffa03d5517>] ? xen_netbk_tx_build_gops+0x59a/0x9e2 [xen_netback]
+    Jun  8 09:16:22 prezident kernel: [4545086.002840]  [<ffffffff81004be5>] ? phys_to_machine+0x13/0x1c
+    Jun  8 09:16:22 prezident kernel: [4545086.002924]  [<ffffffff810040b9>] ? xen_mc_flush+0x124/0x153
+    Jun  8 09:16:22 prezident kernel: [4545086.003007]  [<ffffffff81003124>] ? xen_end_context_switch+0xe/0x1c
+    Jun  8 09:16:22 prezident kernel: [4545086.003094]  [<ffffffff81003b77>] ? xen_mc_issue.constprop.24+0x31/0x49
+    Jun  8 09:16:22 prezident kernel: [4545086.003191]  [<ffffffff8100d02f>] ? load_TLS+0x7/0xa
+    Jun  8 09:16:22 prezident kernel: [4545086.003265]  [<ffffffff8100d6a6>] ? __switch_to+0x13b/0x258
+    Jun  8 09:16:22 prezident kernel: [4545086.003343]  [<ffffffff810359b7>] ? arch_local_irq_enable+0x7/0x8
+    Jun  8 09:16:22 prezident kernel: [4545086.003430]  [<ffffffff81039834>] ? finish_task_switch+0x88/0xb9
+    Jun  8 09:16:22 prezident kernel: [4545086.003517]  [<ffffffff8134c60c>] ? __schedule+0x5ac/0x5c3
+    Jun  8 09:16:22 prezident kernel: [4545086.003596]  [<ffffffffa03d5a8d>] ? xen_netbk_kthread+0x12e/0x6f5 [xen_netback]
+    Jun  8 09:16:22 prezident kernel: [4545086.003702]  [<ffffffff8105f943>] ? add_wait_queue+0x3c/0x3c
+    Jun  8 09:16:22 prezident kernel: [4545086.003785]  [<ffffffffa03d595f>] ? xen_netbk_tx_build_gops+0x9e2/0x9e2 [xen_netback]
+    Jun  8 09:16:22 prezident kernel: [4545086.003896]  [<ffffffff8105f2f1>] ? kthread+0x76/0x7e
+    Jun  8 09:16:22 prezident kernel: [4545086.003972]  [<ffffffff81354ab4>] ? kernel_thread_helper+0x4/0x10
+    Jun  8 09:16:22 prezident kernel: [4545086.004057]  [<ffffffff81352b73>] ? int_ret_from_sys_call+0x7/0x1b
+    Jun  8 09:16:22 prezident kernel: [4545086.004146]  [<ffffffff8134dcbc>] ? retint_restore_args+0x5/0x6
+    Jun  8 09:16:22 prezident kernel: [4545086.004232]  [<ffffffff81354ab0>] ? gs_change+0x13/0x13
+    Jun  8 09:16:22 prezident kernel: [4545086.004307] Code: be 01 00 00 00 e9 cf fe ff ff e8 bb 32 d2 ff 85 c0 0f 95 c0 0f b6 c0 c3 e9 92 32 d2 ff 53 48 89 fb e8 58 32 d2 ff ba 00 00 01 00 <f0> 0f c1 13 89 d1 c1 e9 10 66 39 ca 74 07 f3 90 66 8b 13 eb f4 
+    Jun  8 09:16:22 prezident kernel: [4545086.004859] RIP  [<ffffffff8134d981>] _raw_spin_lock_irqsave+0xe/0x25
+    Jun  8 09:16:22 prezident kernel: [4545086.004952]  RSP <ffff8801d5e9bc30>
+    Jun  8 09:16:22 prezident kernel: [4545086.004999] CR2: 00000000000008b8
+    Jun  8 09:16:22 prezident kernel: [4545086.030275] ---[ end trace ad4724e43471a71d ]---
+
+While I was on my way, Miňo found out that the problem was most likely
+caused by `this bug`__ in the “Xen made easy!” bug tracker.  Later I found
+the corresponding `Debian bugreport`_.  In short, it's a bug in the Linux
+netback/netfront implementation used by Xen, which is triggered when the
+DomU's kernel tries to offload the fragmentation of a packet bigger than
+64 KB to the virtual network interface.  When this happens, the netfront
+driver running in Dom0 disables the affected network interface altogether
+with no way to restore it, other than shutting down the DomU and creating
+it again.  In addition, it occasionally tries to dereference a null
+pointer which has other side effects on the whole Xen stack.
+
+__ `Xen made easy bugreport`_
+
+Anyway, according to the first bug report, a workaround should be to
+disable GSO offloading in the affected DomU, so we rebooted the whole
+physical machine (because of the kernel oops), started all DomUs and
+disabled GSO.
+
+This was the >40 minutes long outage you have seen during the practice
+session.
+
+The contest itself
+------------------
+
+Now for the thing we were the most curious about: how the server would
+handle the load during the actual contest.
+
+I made a plot of the number of requests per minute throughout the contest.
+
+.. image:: /media/2013/06/ipsc-reqs-per-minute.svg
+   :alt: A graph showing the number of requests per minute throughout the contest.
+   :width: 100%
+
+The beginning at 12:00 p.m. was the first big challenge.  Just to be on
+the safe side, though, Mišof cooked up two password-protected zipfiles
+containing all the problem statements that people could download from
+another server and at 12:00 he published the password. This presumably
+reduced the load on the main server a little bit.
+
+Still, at the beginning of the contest, the number of requests per second
+spiked at more than 5200 per minute. The server didn't really notice,
+though, with a load_ of about 0.25.  To put this into perspective, on the
+server hosting the IPSC website previously, at this point the load would
+jump into the double-digits and it would have a hard time processing all
+those requests.  If there were any significant lags this year, then they
+can only have been caused by insufficient bandwidth of the internet
+connectivity.
+
+Within a few minutes the request rate dropped significantly and settled
+slightly above 1000 requests per second where it would have stayed
+throughout the whole contest, had things gone without any unexpected
+trouble.  However, as anyone who's been around computers knows, shit just
+*does* happen.
+
+At 12:13:33, the requests just stopped coming in.  That was really weird,
+I was still connected to the server from the local network, the public
+network interface appeared to be up, only no packets were going through.
+At first I was somewhat clueless, however, the syslog on the hypervisor
+revealed the issue to be the same one that hit us in the morning::
+
+    Jun  8 12:13:33 prezident kernel: [ 8053.515765] vif vif-4-1: vif4.1: Frag is bigger than frame.
+    Jun  8 12:13:33 prezident kernel: [ 8053.515838] vif vif-4-1: vif4.1: fatal error; disabling device
+
+What the hell?  How?  I thought I had implemented the workaround (disabled
+GSO) on all relevant DomUs.  As it turns out, nope, I forgot about this
+particular virtual machine.  As a matter of fact, it didn't even have
+ethtool installed.  A quick shutdown, ``xm create``, try to install
+ethtool.  However, as soon as the machine booted up, it was flooded with
+incoming HTTP requests from contestants nervously spamming the F5 button,
+which means the interface crashed before I could successfully both install
+ethtool and disable GSO.  (I guess I'm too slow at typing. d-: )  That's
+the small spike you can see in the plot.  So, to get the thing to run
+again, I had to give it another reboot.
+
+Finally, I was able to get the machine running with disabled GSO.  I
+thought we were safe and that there was nothing worse that could happen to
+us.  Again, I was proven wrong when the exact same thing happened at
+12:30:53.
+
+This time, I was really desperate.  We already used the workaround
+suggested in the “Xen made easy!” bug report and still it didn't help.  I
+was considering the following two options: either try to migrate the whole
+virtual machine to a physical computer as fast as possible or try to
+perform a dist-upgrade – the machine is still running Debian squeeze, I
+thought that Wheezy might already contain the fix mentioned in the bug
+report.  (Only later I found the Debian bug, which makes it clear this
+isn't true.)
+
+After a short while, Miňo suggested trying to disable every possible kind
+of offloading on the network interface with the following short shell
+script:
+
+.. code:: bash
+   :number-lines:
+
+   #!/bin/bash
+   if_modes="rx tx sg tso ufo gso"
+   for iface in $(ifconfig | awk '$0 ~ /Ethernet/ { print $1 }'); do
+       for if_mode in ${if_modes}; do
+           ethtool -K $iface $if_mode off 2>/dev/null
+       done
+   done
+
+Being as desperate as I was, I set this as the post-up script of both
+ethernet interfaces and rebooted the machine once again.  From then on, I
+was constantly watching the HTTP logs for any silent period longer than a
+second.  We even had a real-time visualization with Logstalgia_ on a
+projector.  Luckily, from then on, the interface hasn't crashed again.
+
+The last big challenge was the end of the contest when everyone is
+reloading the results page.  This is somewhat different from the beginning
+of the contest, because in the beginning, everyone wants to download the
+problem statements in the first possible second, which means a large
+number of requests in one second, but the content is mostly static.  At
+the end of the contest, though, the load tends to build up more gradually
+as more and more teams give up during the last few minutes and just keep
+reloading the results page.  Also, the results page is generated
+dynamically.
+
+Actually, to be honest, the actual contents of the results page are only
+generated every 15 seconds, not on each request, but still, this page has
+to go through a little bit of Python processing before it is returned to
+the client.
+
+Anyway, again, there was a spike at about 3500 requests in the first
+minute after the contest which faded pretty quickly and, again, the server
+didn't even notice – its load was lower than at some points during the
+contest.
+
+To sum up, I think the contest went fairly well, at least from my point of
+view.  There was the hiccup caused by a kernel bug and partly by myself,
+which I apologize for.  However, for the rest of the contest, the server
+handled the load above any expectations.
+
+Looking forward to IPSC 2014 already. (-;
+
+As a bonus, feel free to watch this Logstalgia_ visualization of the
+contest.
+
+.. youtube:: HIlrjP62hYo
+
+.. _Logstalgia: https://code.google.com/p/logstalgia/
+
+.. _load: http://en.wikipedia.org/wiki/Load_(computing)
+
+.. _Xen made easy bugreport: http://xen.crc.id.au/bugs/view.php?id=3
+
+.. _Debian bugreport:
+   http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=701744
+
+.. _IPSC: http://ipsc.ksp.sk
