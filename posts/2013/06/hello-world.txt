@@ -1,0 +1,44 @@
+.. title: Hello world
+.. description: 
+.. date: 2013/06/09 22:47:00
+.. tags: general
+.. slug: hello-world
+.. link: 
+
+So I decided to give blogging another shot after a few years of slacking
+off. The old site where I used to dump my brain has rotten since I last
+used it so here's another attempt, this time using a static site
+generator, which should be less error-prone.
+
+.. TEASER_END
+
+I've been feeling the urge to blog about stuff lately so we'll see how
+long it takes me to give up again.
+
+At first I tried to use Blogofile_, however, after discovering it doesn't
+really have a working mechanism to manage images and in addition its way
+of extracting lead paragraphs for the index rather sucks (it only has a
+limit on the number of words, so it is very likely it will cut the article
+in the middle of a sentence instead of letting the user specify a cutting
+point) and there were a few other things I didn't like about it (such as
+Mako templates or lack of development), I tried to look for alternatives.
+
+I almost settled on Octopress_, which looks rather nice, however, it is
+written in Ruby whose syntax makes me want to engage in an involuntary
+personal protein spill and has no built-in support for ReST (which is what
+I want to write my posts in). Luckily, before I got too much of
+configuration in place, I found out about Nikola_ which seems to be just
+the thing for me. It supports ReST, Jinja, better handling of metadata
+and, of course, is written in Python. On the other hand, it does not
+generate a nested directory structure of posts from a simple flat dump of
+files, though this might not necessarily be a bad thing, in case the
+number of posts grows -- in that case it might be beneficial to have the
+sources already sorted into monthly categories. I'll probably submit a
+patch for a configuration option for the file name of a new post upstream.
+
+.. _Octopress: http://octopress.org/
+
+.. _Blogofile: http://www.blogofile.com/
+
+.. _Nikola: http://nikola.ralsina.com.ar/
+
