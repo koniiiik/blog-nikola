@@ -36,6 +36,9 @@ number of posts grows -- in that case it might be beneficial to have the
 sources already sorted into monthly categories. I'll probably submit a
 patch for a configuration option for the file name of a new post upstream.
 
+Anyway, please bear with me while I work on customizing this site and make
+it not look like another default Bootstrap blog.
+
 .. _Octopress: http://octopress.org/
 
 .. _Blogofile: http://www.blogofile.com/
