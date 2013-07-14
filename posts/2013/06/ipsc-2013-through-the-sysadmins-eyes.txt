@@ -8,7 +8,7 @@
 This year's `Internet Problem Solving Contest`_ is over.  This year was
 special for me, because for the first time I was the root responsible for
 making sure that shit doesn't happen during the contest and in case shit
-does happen, make it go away.
+does happen, making it go away.
 
 .. _Internet Problem Solving Contest: IPSC_
 
