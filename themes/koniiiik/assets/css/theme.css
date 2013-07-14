@@ -25,6 +25,10 @@ img {
 
 #addthisbox {margin-bottom: 12px;}
 
+.addthis_toolbox {
+    margin: 1.5em 0em;
+}
+
 td.label {
     /* Issue #290 */
     background-color: inherit;
