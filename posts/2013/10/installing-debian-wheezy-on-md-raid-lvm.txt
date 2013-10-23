@@ -1,0 +1,100 @@
+.. title: Installing Debian Wheezy on MD RAID + LVM
+.. tags: administration, debian, lvm, raid
+.. link: 
+.. description: 
+.. date: 2013/10/23 17:47:08
+.. slug: installing-debian-wheezy-on-md-raid-lvm
+
+One of our computers has been slowly rotting for about the past four
+years.  It was running services like RADIUS, DHCP or DNS and also acting
+as our backup server.  After it started showing signs of severe madness,
+we acquired a replacement machine.
+
+One of the problems with the old machine was that the disk drive used to
+store our backups wasn't in a RAID of any kind, which turned out to be
+quite truoblesome since it's the one that started failing. Therefore I
+decided to put everyting on a RAID1 on the new machine and also stash LVM
+on top of it -- that's a combination that's been working out quite fine
+for us on our other servers.
+
+I remember reading a few years ago that it was impossible to have
+everything on LVM including /boot. However, these days it's quite possible
+and I was somewhat surprised by how simple it was to set up, considering
+that all tutorials and HOWTOs I found on installing Debian or other Linux
+onto LVM instructed people to create a separate /boot partition which
+would't reside on a logical volume.
+
+.. TEASER_END
+
+Since I wanted to recheck the disks in the machine, instead of booting the
+debian installer directly, I chose the `System Rescue CD`_. After backing
+up all that was needed, I created a partition spanning the whole drive on
+both disks::
+
+    fdisk /dev/sda
+    [create a partition]
+    dd if=/dev/sda of=/dev/sdb bs=512 count=1
+    hdparm -z /dev/sdb
+
+Then, using mdadm, I created a mirror on top of those two partitions::
+
+    mdadm --create --verbose /dev/md0 --level=mirror --raid-devices=2 /dev/sda1 /dev/sdb1
+
+The version of mdadm on SysRescCD 3.8.0 seems to use metadata version 1.2
+by default even though the `docs on mdadm`__ state it still uses 0.9 – YMMV.
+The `Gentoo wiki page on GRUB`_ seems to indicate both should be fine with
+GRUB2.
+
+Then I went on to create LVM on top of that RAID::
+
+    pvcreate /dev/md0 # turn md0 into a LVM physical volume
+    vgcreate system /dev/md0
+    lvcreate -n root -L 40G system
+
+As the next step, I created a filesystem on the new logical volume and
+mounted it::
+
+    mkfs.ext4 -v /dev/system/root
+    mount /dev/system/root /mnt/custom
+
+At this point I proceeded to install Debian Wheezy::
+
+    debootstrap --arch=amd64 --verbose wheezy /mnt/custom http://ftp.sk.debian.org/debian/
+    cd /mnt/custom
+    mount -t proc{,,}
+    mount -t sys{fs,,}
+    mount --bind /dev dev
+    linux64 chroot . bash
+
+I thought the real fun would begin now -- so far this was really
+straightforward. I expected there to be complications with installing
+GRUB, making customizations to the initramdisk to make it include LVM/md
+tools and other things.
+
+Well, turns out I was wrong. All I really needed to do was `the usual
+post-debootstrap setup`_. That means I had to set up ``/etc/fstab``,
+install lvm2, mdadm, a kernel and grub-pc. While setting up GRUB, the
+post-installation script asks where you want to install GRUB -- I chose
+both sda and sdb. It created a ``grub.cfg`` which worked out of the box.
+
+I honestly don't understand how it is possible that the whole thing just
+works. I mean, the commands to load modules for RAID and LVM are there in
+grub.cfg, sure, but the whole thing is actually on a logical volume on top
+of the RAID. It's just black magic.
+
+So, yeah, it was all pretty much painless and much easier than I thought
+it would be. You just don't need to believe all those out-of-date HOWTOs
+floating all aroung the interwebs.
+
+__ `mdadm docs`_
+
+.. _System Rescue CD: http://www.sysresccd.org/
+
+.. _mdadm docs:
+   https://raid.wiki.kernel.org/index.php/RAID_setup#Create_RAID_device
+
+.. _Gentoo wiki page on GRUB:
+   http://wiki.gentoo.org/wiki/GRUB2#Booting_from_RAID_Array
+
+.. _the usual post-debootstrap setup:
+   http://www.debian.org/releases/stable/i386/apds03.html#idp7831952
