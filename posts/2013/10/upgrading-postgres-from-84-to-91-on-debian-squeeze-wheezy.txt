@@ -1,0 +1,91 @@
+.. link: 
+.. slug: upgrading-postgres-from-84-to-91-on-debian-squeeze-wheezy
+.. title: Upgrading Postgres from 8.4 to 9.1 on Debian (Squeeze -> Wheezy)
+.. tags: administration, debian, postgres
+.. date: 2013/10/28 00:47:31
+.. description: 
+
+After finally :doc:`getting a backup server up and running
+<installing-debian-wheezy-on-md-raid-lvm>`, I could finally proceed with
+an upgrade of our primary servers. The upgrade path from Squeeze to Wheezy
+is pretty much smooth, mostly you just need to merge any updates into your
+config files, which is usually no big deal. Well, except for php.ini,
+which was about as painful as writing PHP code.
+
+Anyway, the award for the most difficult package to migrate from Squeeze
+to Wheezy goes to... Postgres. In Squeeze, its version is 8.4; in Wheezy
+we have 9.1. Read on to find out what you *do not* want to do and,
+hopefully, what you might want to do as well.
+
+.. TEASER_END
+
+I recall using pg_upgrade diring the last upgrade. This is a rather
+painful process because upstream Postgres expects all configfiles in
+/var/lib/postgres, while the Debian packages put them into /etc/postgres
+(where they belong, IMO).
+
+So, after a while of googling, I stumbled upon `this question`__ where I
+found out about a nice looking utility called ``pg_upgradecluster``. After
+a bit more research I found out that it is specifically written for Debian
+and Ubuntu, which sounds great and actually made me believe a Postgres
+upgrade might be simple for once.
+
+__ `AskUbuntu question`_
+
+How naive was I...
+
+First attempt, I merged our custom configuration (mainly ``pg_hba.conf``)
+into the default configfiles shipped with the postgres-9.1 package. I like
+to keep my configs as close to default as possible since it is easier to
+find out what exactly has been customized.
+
+This was a somewhat lengthy process, because a lot of comments and
+indentation have been changed between the two versions. Anyway, I got that
+out of the way and tried to follow the actual upgrade process.
+
+However, after running ``pg_upgradecluster 8.4 main`` I got the following
+error::
+
+    Error: specified cluster is not running
+
+This does not make it clear in any way which cluster it expects running.
+Anyway, at this point I noticed two things:
+
+1. My freshly-merged config files were gone. Just not there. Erased.
+   Without a warning.
+2. postgresql-8.4 had been uninstalled, likely automatically by
+   dist-upgrade.
+
+Installing 8.4 is not that much work, I just had to add the main Squeeze
+repository to my sources.list temporarily and do an aptitude install.
+However, the missing config files are a somewhat more difficult matter to
+deal with.
+
+The first thing that came to my mind was ``aptitude reinstall
+postgresql-9.1``. Unfortunately, that didn't make ``/etc/postgresql/9.1``
+reappear, so I tried to google the package containing the files.
+
+As it turns out, Debian packages handle configuration files in a fairly
+weird way, or at least postgresql packages do, since they aren't included
+in any package as /etc. I suspect it might use those in /usr/share/doc,
+but I'm not entirely sure.
+
+Anyway, to get the default files in place, I had to do the following::
+
+    dpkg --purge --force-depends postgresql-9.1
+    aptitude install postgresql-9.1
+
+This time I made sure to backup the merged files and went ahead with the
+upgrade::
+
+    pg_dropcluster --stop 9.1 main
+    pg_upgradecluster 8.4 main
+
+Wow, finally, Postgres 9.1 appears to work. However, this time
+pg_upgradecluster at least warned me about replacing my config files, so
+to finish up, I had to remove the configs put into place by
+pg_upgradecluster and replace them with my hand-crafted ones, set their
+owner to postgres:postgres and that seems to be it.
+
+.. _AskUbuntu question:
+   http://askubuntu.com/questions/66194/how-do-i-migrate-my-postgres-data-from-8-4-to-9-1
