@@ -1,0 +1,249 @@
+.. title: Upgrading a year-old Arch Linux installation
+.. slug: upgrading-a-year-old-arch-linux-installation
+.. tags: administration, arch
+.. date: 2013/11/05 00:37:29
+.. description: 
+.. link: 
+
+Tonight I had some fun dealing with Arch Linux. Some of my friends like to
+joke about Gentoo (which I've been using for more than four years on my
+laptops now) being a Tamagotchi_. While there might be some truth in those
+jokes, my own experience indicates that Arch Linux (which has a
+significantly higher number of users among the people I know) has become
+orders of magnitude worse in this respect, at least during the past couple
+of years.
+
+.. TEASER_END
+
+As the title of this post indicates, the installation in question was an
+Arch Linux on my girlfriend's computer which hadn't been touched for
+nearly one year. That means it was from times before the Arch maintainers
+shoved systemd down everyone's throat and started doing all the other
+stuff just to imitate the best ideas Lennart & co. appear to be bent on
+dictating to everyone.
+
+In other words, the system was still using sysvinit and the good old Arch
+initscripts, it had separate /bin, /sbin and /usr/sbin and a fairly
+extensive collection of rather ancient packages installed on it.
+
+I was forced to go through a similar procedure about half a year ago when
+I had to make a fresh release of `OI-Live`_. At that time I had to get a
+virtual machine to an up-to-date state. This virtual machine only served
+as a template from which I created a new image once per year, which
+usually meant dusting off the machine, one run of ``pacman -Syu``,
+``pacdiffviewer``, build a custom kernel, busybox and maybe a few other
+tools, set a new default KDE wallpaper, create a squashfs and voilà.
+
+During the last few years, there was all the shuffling around in the
+filesystem in Arch, so just to be on the safe side, I created a snapshot
+of the virtual machine and tried to make the jump in one try. I ended up
+with a system where there was no ``/lib/ld-linux.so.2``, which basically
+meant that the only way to run a command was to prepend
+``/usr/lib/ld-linux.so.2`` to it. So, forget about any shell scripts or
+calls like ``system`` or ``exec``. I kept trying to resuscitate the system
+for a while, until I found out about a handy thing: the `Arch Rollback
+Machine`_.
+
+In the end I just ditched the broken virtual machine, restored it from
+the snapshot I had taken earlier and performed the upgrade in about five
+steps, each one between two manual interventions.
+
+This time I was working directly on bare metal, so no snapshots. I thought
+it should still be quite painless though, since I was planning to just do
+the same thing as with my virtual machine: just shove the right date in
+the mirrorlist into the Rollback Machinge entry and perform ``pacman
+-Syu`` repeatedly.
+
+So that's what I did. I copied over the ARM URL from the wiki, put in
+"2013-01-20" as the date and ran ``pacman -Sy``. Crap, 404 not found. What
+the... Oh *great*, apparently the old ARM has been discontinued and
+removed from the face of the Earth and while there is a replacement, it
+only holds an archive for the past couple of months. Fantastic.
+
+That meant we had no choice but to go through the following changes in one
+go:
+
+1. migration to systemd
+2. `migration of the /lib symlink from glibc to filesystem`_
+3. `migration of binaries into /usr/bin`_
+4. and, as it turned out, a few extra stabs in the back, such as KDE
+   package renames which are no longer marked in the repositories,
+   resulting in extensive file conflicts etc.
+
+The funny thing about this is that while the second item required that
+filesystem and glibc be both updated at the same time, the description of
+the third item suggests upgrading glibc all by itself. Like... Wat? And
+these two changes aren't even that far away from each other in time.
+
+To be honest, the first item was achievable beforehand; even though the
+system wasn't migrated to systemd yet, the package was already in place,
+so that's the first thing I did. I added the
+``init=/usr/lib/systemd/systemd`` (ugh) parameter to
+``/etc/default/grub``, ran ``grub-mkconfig -o /boot/grub/grub.cfg``,
+rebooted, enabled all necessary services using ``systemctl`` and all
+seemed to be running more or less okay.
+
+All right then, on to the update.  In the first attempt I tried to just
+``pacman -Syu``, just in case the whole upgrade might just succeed. I was
+fairly sure, though, that there would be at least some file conflicts and,
+of course, I was right. There was a conflict between filesystem and /bin,
+/sbin and /usr/sbin. That was not the only one though – I got a whole lot
+of other conflicts in KDE packages. This is the fourth item in the above
+list.
+
+At first I tried to individually remove the conflicting old KDE packages.
+Of course, other packages were dependent on them, which means I had to
+force pacman to ignore those dependencies. According to the version of
+|pacman(8)|_ that was in place, the ``-d`` flag is supposed to do just
+that. Except that it didn't. Apparently I missed the part about the flag
+having to be present *twice*.
+
+Anyway, after a while I realized that there may be other KDE packages that
+don't have any conflicts but have been dropped or something, which may
+leave some junk in /bin or /usr/sbin, so in the end I decided to just
+uninstall all of KDE and reinstall it after a successful upgrade.
+
+Okay, with KDE out of the way, there was only the annoying conflict in the
+filesystem package. Since I had to upgrade both filesystem and glibc at
+the same time and I couldn't upgrade filesystem right then, the obvious
+choice was ``pacman -Su --ignore filesystem,glibc``. Well, guess what.
+Nope. A bunch of packages required a newer version of glibc, among them,
+pacman. All right then, ``pacman -Sud --ignore filesystem,glibc,pacman``.
+
+Phew, no more conflicts and it seemed to actually do something. Of course,
+with bash moved to /usr/bin/bash, it was no longer possible to execute any
+preinst/postinst scripts, but whatever, I could always just reinstall all
+packages later. The important thing was that stuff was actually moving
+away from all the (s?)bin directories.
+
+Okay, finished. Now just to upgrade the remaining packages and all should
+be all right. So, ``pacman -Su``::
+
+    pacman: error while loading shared libraries: libarchive.so.12: cannot open shared object file: No such file or directory
+
+Crap. At this point I almost gave up. However, being myself, I gave it
+one more shot, so I downloaded the current version of pacman, unpacked the
+pacman binary, the required libalpm.so.8 and moved them into /usr/bin and
+/usr/lib respectively. Hooray, I can run pacman again.
+
+So, seeing that I could now run the newer version of pacman, even though
+I still had the older version of glibc (which I was afraid would render
+pacman impossible to exec or something), I tried to just reinstall pacman
+itself, leaving glibc and filesystem as the last ones.
+
+Obviously, pacman complained about a conflict with the existing files for
+libalpm.so.8, which I had extracted a few minutes ago. It would be quite
+safe to just force overwrite them, though. Unfortunately, as soon as I
+gave pacman the ``-f`` of ``--force`` flag, it would just give me a very
+helpful error message, something along the lines of ``error: invalid
+flag``.
+
+I worked around this eventually by extracting the pacman package to
+``/tmp/pacman``, removing libalpm.so.8 from /usr/lib and executing pacman
+from ``/tmp/pacman/usr/bin`` with ``LD_LIBRARY_PATH=/tmp/pacman/usr/lib``.
+
+Hooray, the list of packages waiting for an upgrade had finally shrunk to
+glibc and filesystem. However, just ``pacman -Su`` still didn't work,
+there were still leftovers in the various (s?)bin directories.
+
+I took a look at what was remaining in /bin, /sbin and /usr/sbin and I
+found a bunch of glibc-related binaries, some initscripts stuff and some
+consolekit junk. I just sent consolekit packing (who would want that stuff
+hanging around, especially since it wasn't the dependency of anything
+anymore), removed all initscripts-related packages (I didn't need those
+anymore, since there was systemd now), but I had no idea what to do about
+glibc.
+
+By then I was mildly out of patience, so I just moved /sbin and /usr/sbin
+out of the way, performed ``pacman -Su`` which finally did what I wanted,
+verified all the binaries I had moved out of the way were properly
+installed again and removed the last traces of the old glibc package.
+
+Wow, upgrade finished! I was honestly surprised I was able to pull this
+off. When I got that error message about libarchive.so.12, I was almost
+sure I would have to reinstall the whole thing from scratch.
+
+The story is still far from over, though, so read on.
+
+Now that I had the up-to-date packages of filesystem, glibc and others,
+there was still a bunch of packages whose pre/postinst scripts hadn't been
+run during their upgrade because of missing /bin/bash. That's easy, just
+reinstall them all and all should be OK.
+
+The Arch wiki page on pacman tips gives a recipe to `reinstall all
+packages`_: ``pacman -Qenq | pacman -S -``, so that's what I did. I was
+surprised though, that this only wanted to reinstall about 150 packages
+while the upgrade I had just finished had upgraded mode than 500 packages.
+After a bit of digging around in the documentation I found out that the
+correct recipe is this one: ``pacman -Qnq | pacman -S -`` – I didn't want
+only explicitly installed packages, I wanted *all* of them.
+
+Okay, now only to reinstall KDE and all should be done. Obviously, there
+was a new systemd version, new udev, new kernel etc, so I tried to reboot.
+
+And this was the final kick in the gut. Of course, the system wouldn't
+boot. As a matter of fact, even the Windows chainloader entry had
+disappeared from grub.cfg.
+
+Obviously, as part of an upgrade of the grub package, the old
+``/etc/default/grub`` had been renamed to ``/etc/default/grub.pacsave``, a
+default one had been installed and used to create a new grub.cfg. The same
+``/etc/default/grub`` where I had put the ``init=/usr/lib/systemd/systemd``
+kernel commandline argument. Since I had uninstalled all sysvinit- and
+initscripts-related packages, there was no ``/sbin/init`` anymore. Whoever
+is the maintainer of the grub package, thanks awfully. It's great that
+even though every other package saves new config files as .pacnew and
+leaves the old ones in place, yours installs the default automatically and
+even takes it one step further and applies it to the bootloader.
+
+So, yeah, I had to boot SysRescCd_, chroot into the system, put the right
+``/etc/default/grub`` into place and regenerate grub.cfg and just for good
+measure, install systemd-sysvinitcompat.
+
+Moral of this story?
+
+Well, I got to know Arch Linux about four years ago, back when it was a
+rather nice, minimalistic, junk-free distribution which appeared to honor
+a statement I had read in the installation guide I was following: that
+Arch Linux was about the freedom of choice and that it was trying to give
+its users full control over the system.
+
+These days? To put it bluntly, I honestly believe that during the last
+year I have spent more time trying to resuscitate Arch Linux systems
+(which got into a fairly broken state just because the maintainers aren't
+interested in giving their users safe upgrade paths over longer periods),
+than I have spent on other systems summed together in my whole lifetime.
+And believe me, I've managed to do some fairly exotic things back in the
+day, such as ``qemu /dev/hda``.
+
+If the arch maintainers are so keen on acting as lab rats for all those
+fantastic ideas folks at Red Hat come up with, let them be my guests. I
+know I won't install Arch on any machine in the foreseeable future and
+will strongly advise other people against doing so as well. If I'll ever
+want a
+Lennart-systemd-freedesktop-consolekit-or-whatever-the-new-cool-thing-is-enabled
+Linux distro, I'd sooner install Red Hat which seems to give at least a
+semblance of a shadow of stability.  (Hint: not gonna happen.)
+
+
+.. _Tamagotchi: http://en.wikipedia.org/wiki/Tamagotchi
+
+.. _OI-Live: https://github.com/koniiiik/oi-live
+
+.. _Arch Rollback Machine:
+   https://wiki.archlinux.org/index.php/Arch_Rollback_Machine
+
+.. _migration of the /lib symlink from glibc to filesystem:
+   https://www.archlinux.org/news/update-filesystem-201301-1-and-glibc-217-2-together/
+
+.. _migration of binaries into /usr/bin:
+   https://www.archlinux.org/news/binaries-move-to-usrbin-requiring-update-intervention/
+
+.. |pacman(8)| replace:: ``pacman(8)``
+
+.. _pacman(8): https://www.archlinux.org/pacman/pacman.8.html
+
+.. _reinstall all packages:
+   https://wiki.archlinux.org/index.php/pacman_Tips#Reinstalling_all_packages
+
+.. _SysRescCd: http://www.sysresccd.org/
