@@ -1,0 +1,124 @@
+.. slug: stock-rom-v-3067083-for-htc-butterfly-s
+.. link: 
+.. tags: android, kitkat, htc, butterfly s, rom
+.. date: 2014/03/19 23:50:06
+.. description: 
+.. title: Stock ROM v. 3.06.708.3 for HTC Butterfly S
+
+Today I released a flashable ZIP of the latest stock KitKat 4.4.2 ROM for
+the HTC Butterfly S. To download the thing, head over to the `thread at
+XDA Developers`_. Read on if you want to find out more about why it took
+me so long and what my impressions of the system are so far.
+
+.. TEASER_END
+
+The update was released for the Hong Kong version of the phone (which is
+the one I own) nearly two weeks ago, which means it took me quite some
+time to get this out. One of the reasons is that Zarboz beat me to it and
+released a ZIP before I found the time to dig into this myself. That's why
+it slipped somewhat lower on my TODO list.
+
+However, it's been brought to my attention that the ZIP in question is not
+completely stock since it contains some flavor of Superuser preinstalled.
+My releases, on the other hand, are completely vanilla without
+modifications of any kind.
+
+That's why I decided to finally get this out of the way this Tuesday.
+
+Making of the installer
+-----------------------
+
+The first complication appeared while I was trying to apply the OTA update
+to a stock, unmodded system on the previous version. I installed the stock
+recovery from the previous update and let it install the OTA. It rebooted
+and... got stuck while booting the system. Weird colors on the screen and
+it just hung.
+
+So I tried again, but this time I selected the update ZIP manually in the
+recovery in order to see the messages it prints. It failed on
+``set_metadata_recursive`` -- it was trying to set extended capabilities
+and SELinux labels on certain files. The stock recovery from 2.21.708.1,
+however, doesn't support these kinds of metadata. Solution? Install the
+recovery from the update I was trying to apply and try again -- went just
+fine.
+
+I have no idea how the update is supposed to work on locked unmodded
+phones, but whatever. Or maybe I just installed an older version of the
+recovery by mistake... No idea and I'm not curious enough to investigate
+this further.
+
+Making the ZIP installer was another challenge. At first, I just took the
+installer from 2.21.708.1, replaced the files, updated the description,
+copied additional metadata commands from the OTA installer, built the
+package and tried to install.
+
+It failed, of course.
+
+The problem was that I was using an ``update-binary`` I found somewhere on
+the XDA forums (don't recall where) and it looks like it is some old
+version which doesn't support the new ``set_metadata`` and
+``set_metadata_recursive`` functions. The easiest thing for me to do was
+to just take the ``update-binary`` from the official OTA package.
+
+This, however, broke the installation of ``boot.img``. Butterfly S doesn't
+have any MTD partitions, its storage is accessed as EMMC. The problem is,
+in the upstream version of the installer, ``write_raw_image`` can only
+write images to MTD partitions, not EMMC. The old version of the binary I
+was using previously must have been patched to support EMMC as well.
+
+Luckily, just calling ``dd`` to write the image to
+``/dev/block/mmcblk0p36``, which is the ``boot`` partition on the
+Butterfly S, seems to work fine.
+
+The only remaining problem is that none of the builds of TWRP that are
+available at the moment support filesystem capabilities and SELinux
+labels, which means the ``set_metadata`` calls will fail when trying to
+set them. From what I've read, only CWM Touch 6.0.4.5 is recent enough to
+support the metadata, but the only build available doesn't support the
+external SD.
+
+I could always make two versions of the ROM, one for recoveries with
+support for these kinds of metadata and one for recoveries without the
+support, but I'm not a big fan of that. Instead, I modified the installer
+to first set the regular metadata that works everywhere and only try to
+set the extended metadata as the very last step of the installation
+process.
+
+If the metadata isn't supported, it should be OK, the installation will
+fail, but everything should be safely in place at that point. If it is
+supported, there's no problem at all. Either way, you end up with a
+working stock system, only the installer might fail, but you can safely
+ignore that.
+
+So yeah, that's a short version of the story; in reality, it took me a lot
+more attempts to flesh out stupid mistakes but these were the biggest
+issues I encountered. Consider that it takes about 15 minutes to build the
+ZIP and push it to the device and then I had to wait for it to finish
+unpacking just to see where it failed... Well, it was tedious.
+
+My impressions of the 4.4.2 system
+----------------------------------
+
+I've been using the new system for about a day and a half and my
+impressions are mixed so far.
+
+The nicest feature I noticed about the update is the ability to bring up
+the notification bar even in full-screen apps. It also turns some of the
+notification area icons (notably, the battery indicator) to
+black-and-white which is okay, I guess; it makes the overall look somewhat
+more consistent with the general monochromatic theme.
+
+However, a big issue seems to be the battery drain. After I finished
+tuning the ROM installer, my phone was most certainly fully charged.
+Within 11 hours of medium usage, the battery level was down to about 10%,
+which is much worse than on my old HTC Desire after three years of service
+with the original battery.
+
+Today, it appears to have performed a tiny bit better, after a full day it
+is at 32%. I guess I'll try to give the system a week to settle (I know
+the Android system needs some time to make statistics in order to optimize
+memory and process management), but if things don't improve significantly,
+I'm afraid I'll have to revert back to 4.3.
+
+.. _thread at XDA Developers:
+   http://forum.xda-developers.com/showthread.php?t=2422783
