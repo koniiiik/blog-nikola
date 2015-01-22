@@ -1,0 +1,8 @@
+.container {
+    width: 55em;
+}
+
+article .entry-content p,
+article .entry-summary p {
+    text-align: justify
+}
