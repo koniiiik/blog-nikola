@@ -17,7 +17,7 @@ SITE_URL = "http://people.ksp.sk/~johnny64/blog"
 # If not set, defaults to SITE_URL
 # BASE_URL = "http://nikola.ralsina.com.ar"
 BLOG_EMAIL = "koniiiik@ksp.sk"
-BLOG_DESCRIPTION = "Tales of a Python coder / system administrator / student"
+BLOG_DESCRIPTION = "Tales of a Python coder / system administrator"
 
 # Nikola is multilingual!
 #
